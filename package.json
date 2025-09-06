@@ -1,0 +1,19 @@
+{
+  "name": "my-first-augmentos-app",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "bun run dist/index.js",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {
+    "@augmentos/sdk": "^1.1.10",
+    "dotenv": "^17.2.0",
+    "openai": "^5.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
