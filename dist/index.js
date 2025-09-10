@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv_1 = require("dotenv");
 const sdk_1 = require("@augmentos/sdk");
 const inkAirDisplay_1 = require("./inkAirDisplay");
+const samAssistant_1 = require("./samAssistant");
 // Load environment variables from .env file
 (0, dotenv_1.config)();
 // Load configuration from environment variables
@@ -26,6 +27,7 @@ class MyAugmentOSApp extends sdk_1.TpaServer {
     constructor() {
         super(...arguments);
         this.hasRunSequence = false;
+        this.samAssistant = new samAssistant_1.SamAssistant();
     }
     getBouncingFrame(time) {
         const width = 15; // Increased total width
@@ -96,7 +98,7 @@ class MyAugmentOSApp extends sdk_1.TpaServer {
                         if (data.isFinal) {
                             console.log('Processing final transcription');
                             try {
-                                await inkAirDisplay_1.samAssistant.handleVoiceCommand(session, data.text);
+                                await this.samAssistant.handleVoiceCommand(session, data.text);
                                 console.log('Voice command processed successfully');
                             }
                             catch (error) {
@@ -123,10 +125,13 @@ class MyAugmentOSApp extends sdk_1.TpaServer {
                     console.log('Displaying Ink Air text...');
                     await (0, inkAirDisplay_1.displayInkAir)(session);
                     console.log('Ink Air display completed');
-                    // Start the e-reader
-                    console.log('Starting e-reader...');
-                    await (0, inkAirDisplay_1.startEReader)(session);
-                    console.log('E-reader completed');
+                    // Display prompt instead of auto-starting e-reader
+                    console.log('Displaying reading prompt...');
+                    await session.layouts.showTextWall('What do you want to read?');
+                    console.log('Reading prompt displayed');
+                    // After 3 seconds, display step-1 hint to guide the user
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    await session.layouts.showTextWall('Hint: say something like "hey sam find pride and prejudice"');
                 }
                 // Set up error handling with more detail
                 session.events.onError((error) => {
@@ -140,7 +145,7 @@ class MyAugmentOSApp extends sdk_1.TpaServer {
                 session.events.onDisconnected(() => {
                     console.log(`Session ${sessionId} disconnected at ${new Date().toISOString()}`);
                     // Clean up any timeouts when disconnected
-                    inkAirDisplay_1.samAssistant.clearCurrentTimeout();
+                    this.samAssistant.clearCurrentTimeout();
                 });
                 // Keep the session alive but don't do anything else
                 await new Promise(() => { }); // This keeps the session open without repeating animations

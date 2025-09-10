@@ -1,7 +1,8 @@
 
 import { config } from 'dotenv';
 import { TpaServer, TpaSession } from '@augmentos/sdk';
-import { displayInkAir, startEReader, samAssistant } from './inkAirDisplay';
+import { displayInkAir, startEReader } from './inkAirDisplay';
+import { SamAssistant } from './samAssistant';
 
 // Load environment variables from .env file
 config();
@@ -28,6 +29,7 @@ if (!OPENAI_API_KEY) {
  */
 class MyAugmentOSApp extends TpaServer {
     private hasRunSequence = false;
+    private samAssistant = new SamAssistant();
 
     private getBouncingFrame(time: number): string {
         const width = 15; // Increased total width
@@ -109,7 +111,7 @@ class MyAugmentOSApp extends TpaServer {
                         if (data.isFinal) {
                             console.log('Processing final transcription');
                             try {
-                                await samAssistant.handleVoiceCommand(session, data.text);
+                                await this.samAssistant.handleVoiceCommand(session, data.text);
                                 console.log('Voice command processed successfully');
                             } catch (error) {
                                 console.error('Error processing voice command:', error);
@@ -139,10 +141,14 @@ class MyAugmentOSApp extends TpaServer {
                     await displayInkAir(session);
                     console.log('Ink Air display completed');
 
-                    // Start the e-reader
-                    console.log('Starting e-reader...');
-                    await startEReader(session);
-                    console.log('E-reader completed');
+                    // Display prompt instead of auto-starting e-reader
+                    console.log('Displaying reading prompt...');
+                    await session.layouts.showTextWall('What do you want to read?');
+                    console.log('Reading prompt displayed');
+
+                    // After 3 seconds, display step-1 hint to guide the user
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    await session.layouts.showTextWall('Hint: say something like "hey sam find pride and prejudice"');
                 }
 
                 // Set up error handling with more detail
@@ -158,7 +164,7 @@ class MyAugmentOSApp extends TpaServer {
                 session.events.onDisconnected(() => {
                     console.log(`Session ${sessionId} disconnected at ${new Date().toISOString()}`);
                     // Clean up any timeouts when disconnected
-                    samAssistant.clearCurrentTimeout();
+                    this.samAssistant.clearCurrentTimeout();
                 });
 
                 // Keep the session alive but don't do anything else

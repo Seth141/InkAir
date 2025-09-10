@@ -33,30 +33,58 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.samAssistant = void 0;
+exports.loadBookContent = loadBookContent;
 exports.displayInkAir = displayInkAir;
 exports.startEReader = startEReader;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const samAssistant_1 = require("./samAssistant");
-// Read the entire text file
-const textContent = fs.readFileSync(path.join(__dirname, 'Burning_Chrome.txt'), 'utf-8');
-// Create a global instance of SamAssistant
-const samAssistant = new samAssistant_1.SamAssistant();
-exports.samAssistant = samAssistant;
+// Read the default text file (accounting for src vs dist directory structure)
+const textFilePath = fs.existsSync(path.join(__dirname, 'Burning_Chrome.txt'))
+    ? path.join(__dirname, 'Burning_Chrome.txt')
+    : path.join(__dirname, '..', 'src', 'Burning_Chrome.txt');
+const defaultTextContent = fs.readFileSync(textFilePath, 'utf-8');
+// Current content being displayed (can be default or loaded book)
+let currentTextContent = defaultTextContent;
 // Function to create text segments
-function createTextSegments(text) {
+function createTextSegments(text, isCustomBook = false) {
     const segments = [];
-    // Add the title and author as the first chunk
-    segments.push('Dogfight\nby Michael Swanwick and William Gibson');
-    // Remove the title and author from the text content for processing
-    const lines = text.split('\n');
-    const contentStartIndex = lines.findIndex(line => line.trim() !== 'Dogfight' &&
-        line.trim() !== 'by Michael Swanwick and William Gibson' &&
-        line.trim() !== '');
-    // Get the content without the title and author
-    const contentText = lines.slice(contentStartIndex).join('\n');
-    const words = contentText.split(/\s+/);
+    if (!isCustomBook) {
+        // Add the title and author as the first chunk for default content
+        segments.push('Dogfight\nby Michael Swanwick and William Gibson');
+        // Remove the title and author from the text content for processing
+        const lines = text.split('\n');
+        const contentStartIndex = lines.findIndex(line => line.trim() !== 'Dogfight' &&
+            line.trim() !== 'by Michael Swanwick and William Gibson' &&
+            line.trim() !== '');
+        // Get the content without the title and author
+        text = lines.slice(contentStartIndex).join('\n');
+    }
+    // For custom books, we'll extract title from the first few lines if possible
+    if (isCustomBook) {
+        const lines = text.split('\n');
+        let titleFound = false;
+        let titleLines = [];
+        // Look for a title in the first 10 lines
+        for (let i = 0; i < Math.min(10, lines.length); i++) {
+            const line = lines[i].trim();
+            if (line.length > 0 && line.length < 100 && !titleFound) {
+                titleLines.push(line);
+                if (titleLines.length >= 2 || line.length > 20) {
+                    titleFound = true;
+                    break;
+                }
+            }
+        }
+        if (titleLines.length > 0) {
+            segments.push(titleLines.join('\n'));
+            // Remove title lines from content
+            const contentStartIndex = lines.findIndex((line, index) => index > titleLines.length && line.trim().length > 20);
+            if (contentStartIndex > 0) {
+                text = lines.slice(contentStartIndex).join('\n');
+            }
+        }
+    }
+    const words = text.split(/\s+/);
     let currentSegment = [];
     let currentLine = [];
     for (const word of words) {
@@ -101,8 +129,18 @@ function createTextSegments(text) {
     }
     return segments;
 }
-// Create the text segments
-const textSegments = createTextSegments(textContent);
+// Create the text segments (initially for default content)
+let textSegments = createTextSegments(currentTextContent);
+/**
+ * Load new book content into the e-reader
+ * @param bookContent The text content of the book
+ */
+function loadBookContent(bookContent) {
+    console.log('Loading new book content into e-reader');
+    currentTextContent = bookContent;
+    textSegments = createTextSegments(currentTextContent, true);
+    console.log(`Book loaded with ${textSegments.length} segments`);
+}
 /**
  * Displays the "Ink Air" text for 5 seconds
  * @param session The active TPA session
@@ -117,13 +155,17 @@ async function displayInkAir(session) {
 /**
  * Displays the e-reader with text from Burning_Chrome.txt
  * @param session The active TPA session
+ * @param startFromChunk The chunk index to start from
+ * @param samAssistant The SamAssistant instance for controlling the reading
  */
-async function startEReader(session, startFromChunk = 0) {
+async function startEReader(session, startFromChunk = 0, samAssistant) {
     for (let i = startFromChunk; i < textSegments.length; i++) {
-        // Update the current chunk in samAssistant
-        samAssistant.setCurrentChunk(i);
+        // Update the current chunk in samAssistant if available
+        if (samAssistant) {
+            samAssistant.setCurrentChunk(i);
+        }
         // Check if auto-scroll is paused
-        if (samAssistant.isAutoScrollPaused()) {
+        if (samAssistant && samAssistant.isAutoScrollPaused()) {
             break;
         }
         const segment = textSegments[i];
@@ -134,19 +176,40 @@ async function startEReader(session, startFromChunk = 0) {
         const displayText = `Page [${chunkNumber}/${totalChunks}]\n\n${segment}`;
         // Display current segment of text with chunk number
         await session.layouts.showTextWall(displayText);
-        // If this isn't the last segment, wait and immediately show the next one
+        // If this isn't the last segment, wait (interruptible) and then show the next one
         if (i < textSegments.length - 1) {
             console.log(`Waiting 5 seconds before chunk ${chunkNumber + 1}...`);
-            // Create a promise that can be interrupted
-            const timeoutPromise = new Promise(resolve => {
-                const timeout = setTimeout(resolve, 5000);
-                samAssistant.setCurrentTimeout(timeout);
-            });
-            await timeoutPromise;
-            console.log(`Time elapsed, immediately showing chunk ${chunkNumber + 1}`);
+            // Implement an interruptible wait that periodically checks pause state
+            const totalWaitMs = 5000;
+            const tickMs = 100;
+            let waitedMs = 0;
+            // Keep a reference to the timeout so callers can still clear it if they want
+            let activeTimeout = null;
+            try {
+                while (waitedMs < totalWaitMs) {
+                    if (samAssistant && samAssistant.isAutoScrollPaused()) {
+                        console.log('Reading paused during wait; stopping e-reader loop');
+                        return;
+                    }
+                    await new Promise(resolve => {
+                        activeTimeout = setTimeout(resolve, tickMs);
+                    });
+                    waitedMs += tickMs;
+                }
+                console.log(`Time elapsed, immediately showing chunk ${chunkNumber + 1}`);
+            }
+            catch (error) {
+                console.log(`Reading interrupted: ${error}`);
+                break;
+            }
+            finally {
+                if (activeTimeout) {
+                    clearTimeout(activeTimeout);
+                }
+            }
         }
     }
-    if (!samAssistant.isAutoScrollPaused()) {
+    if (!samAssistant || !samAssistant.isAutoScrollPaused()) {
         console.log('E-reader finished, clearing display');
         // Clear the display when finished
         await session.layouts.showTextWall('');
