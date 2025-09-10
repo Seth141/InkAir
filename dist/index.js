@@ -120,7 +120,7 @@ class MyAugmentOSApp extends sdk_1.TpaServer {
                     // Show bouncing animation for 4 cycles (8 seconds)
                     console.log('Starting bouncing animation for 4 cycles (8 seconds)...');
                     await this.animateBounce(session);
-                    console.log('Bounce animation completed');
+                    console.log('Bounce animation complete');
                     // Display "Ink Air" for 5 seconds
                     console.log('Displaying Ink Air text...');
                     await (0, inkAirDisplay_1.displayInkAir)(session);
