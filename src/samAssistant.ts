@@ -8,6 +8,9 @@ export class SamAssistant {
   private autoScrollPaused: boolean = false;
   private currentTimeout: NodeJS.Timeout | null = null;
   private currentChunk: number = 0;
+  private pauseReason: 'user' | 'disconnect' | null = null;
+  private waitInterruptResolver: (() => void) | null = null;
+  private readingActive: boolean = false;
   private openai: OpenAI;
   private bookService: BookService;
   private searchResults: BookResult[] = [];
@@ -42,6 +45,47 @@ export class SamAssistant {
       clearTimeout(this.currentTimeout);
       this.currentTimeout = null;
     }
+  }
+
+  public pauseAutoScroll(reason: 'user' | 'disconnect' = 'user'): void {
+    this.autoScrollPaused = true;
+    this.pauseReason = reason;
+    this.clearCurrentTimeout();
+  }
+
+  public resumeAutoScroll(): void {
+    this.autoScrollPaused = false;
+    this.pauseReason = null;
+  }
+
+  public wasPausedByDisconnect(): boolean {
+    return this.pauseReason === 'disconnect';
+  }
+
+  public registerWaitInterruptResolver(resolver: () => void): void {
+    this.waitInterruptResolver = resolver;
+  }
+
+  public interruptWait(): void {
+    if (this.waitInterruptResolver) {
+      const resolver = this.waitInterruptResolver;
+      this.waitInterruptResolver = null;
+      try {
+        resolver();
+      } catch {}
+    }
+  }
+
+  public clearWaitInterruptResolver(): void {
+    this.waitInterruptResolver = null;
+  }
+
+  public setReadingActive(active: boolean): void {
+    this.readingActive = active;
+  }
+
+  public isReadingActive(): boolean {
+    return this.readingActive;
   }
 
   public getCurrentBook(): DownloadedBook | null {
@@ -194,24 +238,23 @@ export class SamAssistant {
     // Process commands
     if (lowerText.includes('stop') || lowerText.includes('pause')) {
       console.log('Stop/Pause command received');
-      this.autoScrollPaused = true;
-      this.clearCurrentTimeout();
+      this.pauseAutoScroll('user');
       this.isListening = false;
       await session.layouts.showTextWall('Reading paused. Say "hey sam, resume" to continue.');
     } else if (lowerText.includes('resume') || lowerText.includes('continue')) {
       console.log('Resume command received');
-      this.autoScrollPaused = false;
+      this.resumeAutoScroll();
       this.isListening = false;
       await startEReader(session, this.currentChunk, this);
     } else if (lowerText.includes('start over') || lowerText.includes('restart')) {
       console.log('Start over command received');
-      this.autoScrollPaused = false;
+      this.resumeAutoScroll();
       this.currentChunk = 0;
       this.isListening = false;
       await startEReader(session, 0, this);
     } else if (lowerText.includes('start reading') || lowerText.includes('begin reading') || lowerText.includes('read')) {
       console.log('Start reading command received');
-      this.autoScrollPaused = false;
+      this.resumeAutoScroll();
       this.currentChunk = 0;
       this.isListening = false;
       await startEReader(session, 0, this);

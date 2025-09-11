@@ -67,7 +67,7 @@ class SamAssistant {
                 resultText += `${i + 1}. "${book.title}" by ${authors}\n`;
             }
             // Append step-2 hint
-            resultText += '\nHint: say something like "hey sam get book 1" to download the first book.';
+            resultText += '\nHint: say something like "hey sam get book 1" ';
             await session.layouts.showTextWall(resultText);
         }
         catch (error) {

@@ -147,6 +147,9 @@ export async function displayInkAir(session: TpaSession): Promise<void> {
  * @param samAssistant The SamAssistant instance for controlling the reading
  */
 export async function startEReader(session: TpaSession, startFromChunk: number = 0, samAssistant?: any): Promise<void> {
+    if (samAssistant) {
+        samAssistant.setReadingActive(true);
+    }
     for (let i = startFromChunk; i < textSegments.length; i++) {
         // Update the current chunk in samAssistant if available
         if (samAssistant) {
@@ -189,6 +192,16 @@ export async function startEReader(session: TpaSession, startFromChunk: number =
                     }
                     await new Promise<void>(resolve => {
                         activeTimeout = setTimeout(resolve, tickMs);
+                        if (samAssistant) {
+                            samAssistant.setCurrentTimeout(activeTimeout);
+                            samAssistant.registerWaitInterruptResolver(() => {
+                                if (activeTimeout) {
+                                    clearTimeout(activeTimeout);
+                                    activeTimeout = null;
+                                }
+                                resolve();
+                            });
+                        }
                     });
                     waitedMs += tickMs;
                 }
@@ -201,6 +214,11 @@ export async function startEReader(session: TpaSession, startFromChunk: number =
                 if (activeTimeout) {
                     clearTimeout(activeTimeout);
                 }
+                if (samAssistant) {
+                    // Clear stored timeout and resolver
+                    samAssistant.clearCurrentTimeout();
+                    samAssistant.clearWaitInterruptResolver();
+                }
             }
         }
     }
@@ -209,6 +227,9 @@ export async function startEReader(session: TpaSession, startFromChunk: number =
         console.log('E-reader finished, clearing display');
         // Clear the display when finished
         await session.layouts.showTextWall('');
+    }
+    if (samAssistant) {
+        samAssistant.setReadingActive(false);
     }
 }
 

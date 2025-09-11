@@ -30,6 +30,7 @@ if (!OPENAI_API_KEY) {
 class MyAugmentOSApp extends TpaServer {
     private hasRunSequence = false;
     private samAssistant = new SamAssistant();
+    private disconnectPauseTimer: NodeJS.Timeout | null = null;
 
     private getBouncingFrame(time: number): string {
         const width = 15; // Increased total width
@@ -163,9 +164,32 @@ class MyAugmentOSApp extends TpaServer {
 
                 session.events.onDisconnected(() => {
                     console.log(`Session ${sessionId} disconnected at ${new Date().toISOString()}`);
-                    // Clean up any timeouts when disconnected
-                    this.samAssistant.clearCurrentTimeout();
+                    // Debounce: only pause if disconnect persists beyond grace period
+                    if (this.disconnectPauseTimer) {
+                        clearTimeout(this.disconnectPauseTimer);
+                    }
+                    this.disconnectPauseTimer = setTimeout(() => {
+                        this.samAssistant.pauseAutoScroll('disconnect');
+                        this.samAssistant.interruptWait();
+                        this.disconnectPauseTimer = null;
+                    }, 3000);
                 });
+
+                // Clear any pending disconnect debounce when a new session starts
+                if (this.disconnectPauseTimer) {
+                    clearTimeout(this.disconnectPauseTimer);
+                    this.disconnectPauseTimer = null;
+                }
+
+                // If reading was paused due to disconnect, automatically resume from last chunk
+                if (this.samAssistant.wasPausedByDisconnect() && this.samAssistant.isReadingActive()) {
+                    console.log('Resuming reading after reconnect...');
+                    try {
+                        await session.layouts.showTextWall('Resuming reading...');
+                    } catch {}
+                    this.samAssistant.resumeAutoScroll();
+                    await startEReader(session, this.samAssistant.getCurrentChunk(), this.samAssistant);
+                }
 
                 // Keep the session alive but don't do anything else
                 await new Promise(() => {}); // This keeps the session open without repeating animations
